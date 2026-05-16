@@ -96,21 +96,24 @@ module dbg_bridge
 //-----------------------------------------------------------------
 localparam REQ_WRITE        = 8'h10;
 localparam REQ_READ         = 8'h11;
+localparam REQ_WRITE_KH     = 8'h12;
+localparam REQ_READ_KH      = 8'h13;
 
 `define STATE_W        4
 `define STATE_R        3:0
 localparam STATE_IDLE       = 4'd0;
-localparam STATE_LEN        = 4'd2;
-localparam STATE_ADDR0      = 4'd3;
-localparam STATE_ADDR1      = 4'd4;
-localparam STATE_ADDR2      = 4'd5;
-localparam STATE_ADDR3      = 4'd6;
-localparam STATE_WRITE      = 4'd7;
-localparam STATE_READ       = 4'd8;
-localparam STATE_DATA0      = 4'd9;
-localparam STATE_DATA1      = 4'd10;
-localparam STATE_DATA2      = 4'd11;
-localparam STATE_DATA3      = 4'd12;
+localparam STATE_LEN0       = 4'd2;
+localparam STATE_LEN1       = 4'd3;
+localparam STATE_ADDR0      = 4'd4;
+localparam STATE_ADDR1      = 4'd5;
+localparam STATE_ADDR2      = 4'd6;
+localparam STATE_ADDR3      = 4'd7;
+localparam STATE_WRITE      = 4'd8;
+localparam STATE_READ       = 4'd9;
+localparam STATE_DATA0      = 4'd10;
+localparam STATE_DATA1      = 4'd11;
+localparam STATE_DATA2      = 4'd12;
+localparam STATE_DATA3      = 4'd13;
 
 //-----------------------------------------------------------------
 // Wires / Regs
@@ -138,13 +141,16 @@ reg [31:0] mem_addr_q;
 reg        mem_busy_q;
 reg        mem_wr_q;
 
-reg [7:0]  len_q;
+reg [15:0]  len_q;
 
 // Byte Index
 reg [1:0]  data_idx_q;
 
 // Word storage
 reg [31:0] data_q;
+
+// Keyhole access (address auto-increment off)
+reg keyhole_q;
 
 wire magic_addr_w = (mem_addr_q == GPIO_ADDRESS || mem_addr_q == STS_ADDRESS);
 
@@ -212,8 +218,8 @@ u_fifo_tx
 dbg_bridge_fifo
 #(
     .WIDTH(8),
-    .DEPTH(8),
-    .ADDR_W(3)
+    .DEPTH(32),
+    .ADDR_W(5)
 )
 u_fifo_rx
 (
@@ -251,8 +257,10 @@ begin
         begin
             case (rx_data_w)
             REQ_WRITE,
-            REQ_READ:
-                next_state_r = STATE_LEN;
+            REQ_READ,
+            REQ_WRITE_KH,
+            REQ_READ_KH:
+                next_state_r = STATE_LEN0;
             default:
                 ;
             endcase
@@ -261,7 +269,12 @@ begin
     //-----------------------------------------
     // STATE_LEN
     //-----------------------------------------
-    STATE_LEN :
+    STATE_LEN0 :
+    begin
+        if (rx_valid_w)
+            next_state_r  = STATE_LEN1;
+    end
+    STATE_LEN1 :
     begin
         if (rx_valid_w)
             next_state_r  = STATE_ADDR0;
@@ -284,7 +297,7 @@ begin
     //-----------------------------------------
     STATE_WRITE :
     begin
-        if (len_q == 8'b0 && (mem_bvalid_i || magic_addr_w))
+        if (len_q == 16'b0 && (mem_bvalid_i || magic_addr_w))
             next_state_r  = STATE_IDLE;
         else
             next_state_r  = STATE_WRITE;
@@ -305,7 +318,7 @@ begin
     begin
         if (read_skip_w)
             next_state_r  = STATE_DATA1;
-        else if (tx_accept_w && (len_q == 8'b0))
+        else if (tx_accept_w && (len_q == 16'b0))
             next_state_r  = STATE_IDLE;
         else if (tx_accept_w)
             next_state_r  = STATE_DATA1;
@@ -314,7 +327,7 @@ begin
     begin
         if (read_skip_w)
             next_state_r  = STATE_DATA2;
-        else if (tx_accept_w && (len_q == 8'b0))
+        else if (tx_accept_w && (len_q == 16'b0))
             next_state_r  = STATE_IDLE;
         else if (tx_accept_w)
             next_state_r  = STATE_DATA2;
@@ -323,14 +336,14 @@ begin
     begin
         if (read_skip_w)
             next_state_r  = STATE_DATA3;
-        else if (tx_accept_w && (len_q == 8'b0))
+        else if (tx_accept_w && (len_q == 16'b0))
             next_state_r  = STATE_IDLE;
         else if (tx_accept_w)
             next_state_r  = STATE_DATA3;
     end
     STATE_DATA3 :
     begin
-        if (tx_accept_w && (len_q != 8'b0))
+        if (tx_accept_w && (len_q != 16'b0))
             next_state_r  = STATE_READ;
         else if (tx_accept_w)
             next_state_r  = STATE_IDLE;
@@ -359,27 +372,41 @@ assign tx_valid_w = ((state_q == STATE_DATA0) |
 
 // Accept data in the following states
 assign rx_accept_w = (state_q == STATE_IDLE) |
-                     (state_q == STATE_LEN) |
+                     (state_q == STATE_LEN0) |
+                     (state_q == STATE_LEN1) |
                      (state_q == STATE_ADDR0) |
                      (state_q == STATE_ADDR1) |
                      (state_q == STATE_ADDR2) |
                      (state_q == STATE_ADDR3) |
                      (state_q == STATE_WRITE && !mem_busy_q);
 
+
+
+//-----------------------------------------------------------------
+// Capture keyhole access
+//-----------------------------------------------------------------
+always @ (posedge clk_i or posedge rst_i)
+if (rst_i)
+    keyhole_q <= 1'b0;
+else if (state_q == STATE_IDLE && rx_valid_w)
+    keyhole_q <= (rx_data_w == REQ_WRITE_KH || rx_data_w == REQ_READ_KH);
+
 //-----------------------------------------------------------------
 // Capture length
 //-----------------------------------------------------------------
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
-    len_q       <= 8'd0;
-else if (state_q == STATE_LEN && rx_valid_w)
-    len_q[7:0]  <= rx_data_w;
+    len_q       <= 16'd0;
+else if (state_q == STATE_LEN0 && rx_valid_w)
+    len_q[15:8]  <= rx_data_w;
+else if (state_q == STATE_LEN1 && rx_valid_w)
+    len_q[7:0] <= rx_data_w;
 else if (state_q == STATE_WRITE && rx_valid_w && !mem_busy_q)
-    len_q       <= len_q - 8'd1;
+    len_q       <= len_q - 16'd1;
 else if (state_q == STATE_READ && ((mem_busy_q && mem_rvalid_i) || magic_addr_w))
-    len_q       <= len_q - 8'd1;
+    len_q       <= len_q - 16'd1;
 else if (((state_q == STATE_DATA0) || (state_q == STATE_DATA1) || (state_q == STATE_DATA2)) && (tx_accept_w && !read_skip_w))
-    len_q       <= len_q - 8'd1;
+    len_q       <= len_q - 16'd1;
 
 //-----------------------------------------------------------------
 // Capture addr
@@ -395,10 +422,10 @@ else if (state_q == STATE_ADDR2 && rx_valid_w)
     mem_addr_q[15:8]  <= rx_data_w;
 else if (state_q == STATE_ADDR3 && rx_valid_w)
     mem_addr_q[7:0]   <= rx_data_w;
-// Address increment on every access issued
-else if (state_q == STATE_WRITE && (mem_busy_q && mem_bvalid_i))
+// Address increment on every access issued if not in keyhole access mode
+else if (!keyhole_q && state_q == STATE_WRITE && (mem_busy_q && mem_bvalid_i))
     mem_addr_q        <= {mem_addr_q[31:2], 2'b0} + 'd4;
-else if (state_q == STATE_READ && (mem_busy_q && mem_rvalid_i))
+else if (!keyhole_q && state_q == STATE_READ && (mem_busy_q && mem_rvalid_i))
     mem_addr_q        <= {mem_addr_q[31:2], 2'b0} + 'd4;
 
 //-----------------------------------------------------------------
@@ -571,7 +598,7 @@ if (rst_i)
 else if (state_q == STATE_IDLE)
     mem_sel_q   <= 4'b1111;
 // Every 4th byte, issue bus access
-else if (state_q == STATE_WRITE && rx_valid_w && (data_idx_q == 2'd3 || len_q == 8'd1))
+else if (state_q == STATE_WRITE && rx_valid_w && (data_idx_q == 2'd3 || len_q == 16'd1))
     mem_sel_q   <= mem_sel_r;
 
 assign mem_wstrb_o  = mem_sel_q;
@@ -583,7 +610,7 @@ always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
     mem_wr_q    <= 1'b0;
 else if (state_q == STATE_IDLE && rx_valid_w)
-    mem_wr_q    <= (rx_data_w == REQ_WRITE);
+    mem_wr_q    <= (rx_data_w == REQ_WRITE || rx_data_w == REQ_WRITE_KH);
 
 //-----------------------------------------------------------------
 // Access in progress

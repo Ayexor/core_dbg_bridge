@@ -39,13 +39,18 @@ class BusInterface:
     ##################################################################
     # write: Write a block of data to a specified address
     ##################################################################
-    def write(self, addr, data, length, addr_incr=True, max_block_size=-1):
-        self.bus.write(addr, data, length, addr_incr, max_block_size)
+    def write(self, addr, data, length=None, addr_incr=True, max_block_size=-1):
+        if length is None:
+            self.bus.write32(addr, data)
+        else:
+            self.bus.write(addr, data, length, addr_incr, max_block_size)
 
     ##################################################################
     # read: Read a block of data from a specified address
     ##################################################################
-    def read(self, addr, length, addr_incr=True, max_block_size=-1):
+    def read(self, addr, length=None, addr_incr=True, max_block_size=-1):
+        if length is None:
+            return self.bus.read32(addr)
         return self.bus.read(addr, length, addr_incr, max_block_size)
 
     ##################################################################
