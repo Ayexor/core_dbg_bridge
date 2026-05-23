@@ -140,8 +140,7 @@ class UartBusInterface:
             cmd[5] = (addr >> 8)  & 0xFF
             cmd[6] = (addr >> 0)  & 0xFF
 
-            for i in range(l):
-                cmd[7+i] = data[idx + i]
+            cmd[7:7+l] = data[idx:idx+l]
 
             # Write to serial port
             self.uart.write(cmd)

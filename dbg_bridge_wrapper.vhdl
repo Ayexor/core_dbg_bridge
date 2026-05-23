@@ -56,7 +56,7 @@ architecture rtl of dbg_bridge_wrapper is
   attribute X_INTERFACE_PARAMETER : string;
 
   ATTRIBUTE X_INTERFACE_INFO of clk: SIGNAL is "xilinx.com:signal:clock:1.0 clk CLK";
-  ATTRIBUTE X_INTERFACE_PARAMETER of clk: SIGNAL is "ASSOCIATED_BUSIF mem, ASSOCIATED_RESET rstn, FREQ_HZ 100000000, FREQ_TOLERANCE_HZ 0";
+  ATTRIBUTE X_INTERFACE_PARAMETER of clk: SIGNAL is "ASSOCIATED_BUSIF mem, ASSOCIATED_RESET rstn";
 
   ATTRIBUTE X_INTERFACE_INFO of rstn: SIGNAL is "xilinx.com:signal:reset:1.0 rstn RST";
   ATTRIBUTE X_INTERFACE_PARAMETER of rstn: SIGNAL is "POLARITY ACTIVE_LOW";
@@ -99,6 +99,9 @@ architecture rtl of dbg_bridge_wrapper is
   attribute X_INTERFACE_INFO of mem_rlast: SIGNAL is "xilinx.com:interface:aximm:1.0 mem RLAST";
   attribute X_INTERFACE_INFO of mem_rvalid: SIGNAL is "xilinx.com:interface:aximm:1.0 mem RVALID";
   attribute X_INTERFACE_INFO of mem_rready: SIGNAL is "xilinx.com:interface:aximm:1.0 mem RREADY";
+
+  attribute X_INTERFACE_PARAMETER of mem_araddr : signal is
+  "PROTOCOL AXI4LITE, DATA_WIDTH 32, ADDR_WIDTH 32, READ_WRITE_MODE READ_WRITE";
 
 
 
